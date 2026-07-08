@@ -113,7 +113,8 @@
 <canvas id="canvas" class="hidden"></canvas>
 
 <script>
-var SEND_INTERVAL_MS=1500, STILL_THRESHOLD=8, JPEG_QUALITY=0.7, MAX_EDGE=1024, SEEN_COOLDOWN_MS=8000;
+var SEND_INTERVAL_MS=900, STILL_THRESHOLD=18, JPEG_QUALITY=0.7, MAX_EDGE=1024, SEEN_COOLDOWN_MS=8000;
+var FORCE_SEND_MS=2200, FETCH_TIMEOUT_MS=12000;
 var LS='shukka_cfg_v1';
 var CFG={url:'',token:'',worker:''};
 var video=document.getElementById('video'), canvas=document.getElementById('canvas');
@@ -126,11 +127,21 @@ function saveCfg(){localStorage.setItem(LS,JSON.stringify(CFG));}
 function haveCfg(){return CFG.url&&CFG.worker;}
 
 // ===== 通信（素HTTPS→GASへ fetch。text/plainでプリフライト回避） =====
+function postOnce(payload){
+  var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var timer=setTimeout(function(){if(ctrl)ctrl.abort();},FETCH_TIMEOUT_MS);
+  var opt={method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:payload,redirect:'follow'};
+  if(ctrl)opt.signal=ctrl.signal;
+  return fetch(CFG.url,opt)
+    .then(function(r){return r.text();})
+    .then(function(t){clearTimeout(timer);try{return JSON.parse(t);}catch(e){throw new Error('bad-response');}},
+          function(e){clearTimeout(timer);throw e;});
+}
 function post(body){
   body.token=CFG.token; body.worker=CFG.worker;
-  return fetch(CFG.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow'})
-    .then(function(r){return r.text();})
-    .then(function(t){try{return JSON.parse(t);}catch(e){throw new Error('bad-response');}});
+  var payload=JSON.stringify(body);
+  // タイムアウト/通信断は1回だけ自動再送（inFlightが固まるのを防ぐ）
+  return postOnce(payload).catch(function(){return postOnce(payload);});
 }
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function setBadge(t,c){var b=document.getElementById('badge');b.textContent=t;b.style.background=c||'rgba(10,16,26,.72)';}
@@ -201,7 +212,10 @@ function tick(){
   if(canvas.width!==w){canvas.width=w;canvas.height=h;}
   ctx.drawImage(video,0,0,w,h);
   var moved=frameDiff(),now=Date.now();
-  if(!moved&&(now-lastSentAt)>SEND_INTERVAL_MS){lastSentAt=now;sendFrame();}
+  // 静止したら送る。動いていても最後の送信からFORCE_SEND_MS超なら送る（手ブレで読めない対策）
+  var still=(!moved&&(now-lastSentAt)>SEND_INTERVAL_MS);
+  var forced=((now-lastSentAt)>FORCE_SEND_MS);
+  if(still||forced){lastSentAt=now;sendFrame();}
 }
 function frameDiff(){
   var sw=32,sh=32,tmp=frameDiff._c||(frameDiff._c=document.createElement('canvas'));
