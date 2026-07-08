@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="robots" content="noindex,nofollow">
+<title>出荷前消込スキャン</title>
+<style>
+  :root{
+    --bg:#0e1420; --bg2:#141c2b; --card:#182234; --line:#26344a;
+    --txt:#eef2f8; --muted:#8b99ad; --sub:#aeb9ca;
+    --accent:#2dd4bf; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --info:#60a5fa;
+    --shadow:0 6px 20px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:#000;color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;}
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh;}
+  .cam-wrap{position:relative;background:#000;flex:1;overflow:hidden;}
+  video{width:100%;height:100%;object-fit:cover;}
+  .reticle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+  .reticle .box{width:74%;height:30%;border:2px solid rgba(255,255,255,.55);border-radius:14px;box-shadow:0 0 0 100vmax rgba(0,0,0,.28);}
+  .badge{position:absolute;top:12px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:999px;font-size:12.5px;font-weight:600;
+    background:rgba(10,16,26,.72);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(6px);}
+  .last{position:absolute;left:14px;right:14px;bottom:14px;padding:14px 16px;border-radius:16px;background:rgba(12,18,28,.82);
+    backdrop-filter:blur(8px);text-align:center;border:1px solid rgba(255,255,255,.06);}
+  .last.hidden{display:none;}
+  .last .num{font-size:32px;font-weight:800;letter-spacing:.04em;font-variant-numeric:tabular-nums;}
+  .last .sub{font-size:12.5px;color:var(--sub);margin-top:3px;}
+  .last.done .num{color:var(--ok);} .last.review .num{color:var(--warn);}
+  .last.outside .num{color:var(--bad);} .last.already .num{color:var(--info);}
+
+  .setup{position:absolute;inset:0;z-index:10;background:rgba(8,12,20,.96);padding:24px 20px;overflow-y:auto;}
+  .setup.hidden{display:none;}
+  .setup h2{font-size:16px;margin:0 0 4px;}
+  .setup p{font-size:12px;color:var(--muted);margin:0 0 16px;line-height:1.6;}
+  .fld{margin-bottom:12px;}
+  .fld label{display:block;font-size:11.5px;color:var(--sub);margin-bottom:5px;}
+  .fld input{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:15px;}
+  .start-ov{position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    background:rgba(8,12,20,.92);padding:24px;text-align:center;}
+  .start-ov.hidden{display:none;}
+  .start-ov h2{font-size:17px;margin:0;} .start-ov p{font-size:12.5px;color:var(--muted);margin:0;max-width:280px;line-height:1.6;}
+  .start-ov .err{color:var(--bad);font-size:12px;min-height:1em;max-width:300px;word-break:break-word;}
+
+  .panel{background:var(--bg2);border-top:1px solid var(--line);padding:12px 14px calc(12px + env(safe-area-inset-bottom));}
+  .prow{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .prow .worker{font-size:11.5px;color:var(--muted);flex:1;}
+  .prow .worker b{color:var(--sub);font-weight:600;}
+  .stats{display:flex;gap:8px;margin-bottom:10px;}
+  .stat{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 6px;text-align:center;}
+  .stat b{display:block;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .stat span{font-size:10.5px;color:var(--muted);}
+  .stat.done b{color:var(--ok);} .stat.out b{color:var(--bad);}
+  .tray h3{font-size:12px;margin:10px 0 6px;color:var(--warn);font-weight:600;}
+  .tray-item{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px;}
+  .tray-item .n{font-size:17px;font-weight:700;flex:1;font-variant-numeric:tabular-nums;}
+  .tray-item .nm{font-size:11px;color:var(--muted);font-weight:400;margin-left:6px;}
+  .empty{color:var(--muted);font-size:12px;padding:4px 0;}
+  .controls{display:flex;gap:8px;}
+  button{border:none;border-radius:11px;padding:12px 16px;font-size:14px;font-weight:700;cursor:pointer;color:#06231f;}
+  .btn{background:var(--accent);} .btn-line{background:transparent;color:var(--sub);border:1px solid var(--line);}
+  .btn-sm{padding:9px 12px;font-size:13px;} .btn-block{width:100%;}
+  .btn-start{background:var(--ok);} .btn-stop{background:var(--bad);color:#fff;}
+  .btn-big{font-size:16px;padding:15px 34px;border-radius:14px;}
+  .gear{position:absolute;top:10px;right:12px;z-index:8;background:rgba(10,16,26,.7);border:1px solid rgba(255,255,255,.1);
+    color:var(--sub);border-radius:10px;padding:6px 10px;font-size:12px;}
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="cam-wrap">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="reticle"><div class="box"></div></div>
+    <div class="badge" id="badge">準備中</div>
+    <button class="gear" id="gear">設定</button>
+    <div class="last hidden" id="last"><div class="num" id="lastNum">—</div><div class="sub" id="lastSub"></div></div>
+
+    <!-- 初回設定 -->
+    <div class="setup" id="setup">
+      <h2>初回設定</h2>
+      <p>この端末で1回だけ設定します（次回から自動）。管理者から共有された値を入れてください。</p>
+      <div class="fld"><label>接続先URL（GASのexec URL）</label><input id="cfgUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+      <div class="fld"><label>合言葉（トークン）</label><input id="cfgToken" type="text" placeholder="管理者から共有"></div>
+      <div class="fld"><label>あなたの名前（消込者として記録）</label><input id="cfgWorker" type="text" placeholder="例: 山田"></div>
+      <button class="btn btn-block" id="cfgSave">保存して始める</button>
+    </div>
+
+    <!-- カメラ起動 -->
+    <div class="start-ov hidden" id="startOverlay">
+      <h2>カメラで消込スキャン</h2>
+      <p>枠内に管理番号（上下逆でOK）を映すと自動で読み取ります。</p>
+      <button class="btn btn-big" id="btnEnable">カメラを起動</button>
+      <div class="err" id="startErr"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="prow">
+      <div class="worker">消込者：<b id="workerName">—</b></div>
+      <button class="btn-line btn-sm" id="btnStats">進捗更新</button>
+    </div>
+    <div class="stats">
+      <div class="stat done"><b id="sDone">0</b><span>消込済</span></div>
+      <div class="stat"><b id="sTodo">0</b><span>未</span></div>
+      <div class="stat out"><b id="sOut">0</b><span>リスト外</span></div>
+    </div>
+    <div class="controls"><button class="btn btn-start btn-block" id="btnScan" disabled>スキャン開始</button></div>
+    <div class="tray"><h3>要確認（迷った番号・タップで確定）</h3><div id="trayList"><div class="empty">なし</div></div></div>
+  </div>
+</div>
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+var SEND_INTERVAL_MS=1500, STILL_THRESHOLD=8, JPEG_QUALITY=0.7, MAX_EDGE=1024, SEEN_COOLDOWN_MS=8000;
+var LS='shukka_cfg_v1';
+var CFG={url:'',token:'',worker:''};
+var video=document.getElementById('video'), canvas=document.getElementById('canvas');
+var ctx=canvas.getContext('2d',{willReadFrequently:true});
+var scanning=false,lastSentAt=0,prevGray=null,inFlight=false,recentSeen={},cameraReady=false;
+
+// ===== 設定の保存・読込 =====
+function loadCfg(){try{var s=JSON.parse(localStorage.getItem(LS)||'{}');CFG.url=s.url||'';CFG.token=s.token||'';CFG.worker=s.worker||'';}catch(e){}}
+function saveCfg(){localStorage.setItem(LS,JSON.stringify(CFG));}
+function haveCfg(){return CFG.url&&CFG.worker;}
+
+// ===== 通信（素HTTPS→GASへ fetch。text/plainでプリフライト回避） =====
+function post(body){
+  body.token=CFG.token; body.worker=CFG.worker;
+  return fetch(CFG.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),redirect:'follow'})
+    .then(function(r){return r.text();})
+    .then(function(t){try{return JSON.parse(t);}catch(e){throw new Error('bad-response');}});
+}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function setBadge(t,c){var b=document.getElementById('badge');b.textContent=t;b.style.background=c||'rgba(10,16,26,.72)';}
+function seenRecently(n){var t=recentSeen[n];return t&&(Date.now()-t)<SEEN_COOLDOWN_MS;}
+function markSeen(n){recentSeen[n]=Date.now();}
+
+// ===== 画面遷移 =====
+function showSetup(){
+  document.getElementById('cfgUrl').value=CFG.url;
+  document.getElementById('cfgToken').value=CFG.token;
+  document.getElementById('cfgWorker').value=CFG.worker;
+  document.getElementById('setup').classList.remove('hidden');
+}
+function hideSetup(){document.getElementById('setup').classList.add('hidden');}
+document.getElementById('gear').onclick=showSetup;
+document.getElementById('cfgSave').onclick=function(){
+  CFG.url=document.getElementById('cfgUrl').value.trim();
+  CFG.token=document.getElementById('cfgToken').value.trim();
+  CFG.worker=document.getElementById('cfgWorker').value.trim();
+  if(!CFG.url||!CFG.worker){alert('URLと名前は必須です');return;}
+  saveCfg();hideSetup();afterCfg();
+};
+function afterCfg(){
+  document.getElementById('workerName').textContent=CFG.worker||'—';
+  document.getElementById('startOverlay').classList.remove('hidden');
+  refreshStats();
+}
+
+// ===== カメラ起動（素HTTPS＝iframe制約なし。タップ起点で許可） =====
+document.getElementById('btnEnable').onclick=function(){
+  var err=document.getElementById('startErr');err.textContent='';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){err.textContent='この端末ではカメラが使えません';return;}
+  this.disabled=true;this.textContent='起動中…';var self=this;
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})
+    .then(function(stream){video.srcObject=stream;return video.play();})
+    .then(function(){
+      cameraReady=true;
+      document.getElementById('startOverlay').classList.add('hidden');
+      document.getElementById('btnScan').disabled=false;
+      setBadge('停止中');startScan();
+    })
+    .catch(function(e){
+      self.disabled=false;self.textContent='カメラを起動';
+      err.textContent='['+((e&&e.name)||'?')+'] '+(((e&&e.message)||'').slice(0,90));
+    });
+};
+
+function startScan(){
+  if(!cameraReady||scanning) return;
+  scanning=true;var b=document.getElementById('btnScan');
+  b.textContent='スキャン停止';b.classList.remove('btn-start');b.classList.add('btn-stop');
+  setBadge('スキャン中','rgba(52,211,153,.85)');beep(660,60);tick();
+}
+function stopScan(){
+  scanning=false;var b=document.getElementById('btnScan');
+  b.textContent='スキャン開始';b.classList.add('btn-start');b.classList.remove('btn-stop');setBadge('停止中');
+}
+document.getElementById('btnScan').onclick=function(){scanning?stopScan():startScan();};
+document.getElementById('btnStats').onclick=function(){refreshStats();};
+
+// ===== スキャンループ =====
+function tick(){
+  if(!scanning) return;
+  requestAnimationFrame(tick);
+  if(inFlight||!video.videoWidth) return;
+  var scale=Math.min(1,MAX_EDGE/Math.max(video.videoWidth,video.videoHeight));
+  var w=Math.round(video.videoWidth*scale),h=Math.round(video.videoHeight*scale);
+  if(canvas.width!==w){canvas.width=w;canvas.height=h;}
+  ctx.drawImage(video,0,0,w,h);
+  var moved=frameDiff(),now=Date.now();
+  if(!moved&&(now-lastSentAt)>SEND_INTERVAL_MS){lastSentAt=now;sendFrame();}
+}
+function frameDiff(){
+  var sw=32,sh=32,tmp=frameDiff._c||(frameDiff._c=document.createElement('canvas'));
+  tmp.width=sw;tmp.height=sh;var tctx=tmp.getContext('2d');tctx.drawImage(canvas,0,0,sw,sh);
+  var d=tctx.getImageData(0,0,sw,sh).data,gray=new Uint8Array(sw*sh);
+  for(var i=0,j=0;i<d.length;i+=4,j++)gray[j]=(d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11)|0;
+  var moved=true;
+  if(prevGray){var sum=0;for(var k=0;k<gray.length;k++)sum+=Math.abs(gray[k]-prevGray[k]);moved=(sum/gray.length)>STILL_THRESHOLD;}
+  prevGray=gray;return moved;
+}
+function sendFrame(){
+  inFlight=true;setBadge('読取中…','rgba(96,165,250,.85)');
+  var base64=canvas.toDataURL('image/jpeg',JPEG_QUALITY).split(',')[1];
+  post({action:'scan',image:base64,mediaType:'image/jpeg'})
+    .then(handleScanResult).catch(function(){setBadge('通信エラー・再試行','rgba(248,113,113,.85)');})
+    .then(function(){inFlight=false;if(scanning)setBadge('スキャン中','rgba(52,211,153,.85)');});
+}
+function handleScanResult(r){
+  if(!r||!r.ok){ if(r&&r.error==='unauthorized')setBadge('合言葉が違います','rgba(248,113,113,.85)'); return; }
+  switch(r.result){
+    case 'done':
+      if(!seenRecently(r.number)){markSeen(r.number);showLast(r.number,(r.name||'')+'  消込',' done');beep(880,90);bumpStat('done');}
+      break;
+    case 'review':
+      addToTray(r.number,r.name);
+      if(!seenRecently(r.number)){markSeen(r.number);showLast(r.number,'要確認（迷い）',' review');beep(440,120);}
+      break;
+    case 'already': showLast(r.number,'消込済（'+(r.by||'')+'）',' already'); break;
+    case 'outside':
+      if(!seenRecently(r.number)){markSeen(r.number);showLast(r.number,'リスト外',' outside');beep(220,160);bumpStat('outside');}
+      break;
+  }
+}
+var trayItems={};
+function addToTray(num,name){if(trayItems[num])return;trayItems[num]={name:name};renderTray();}
+function renderTray(){
+  var el=document.getElementById('trayList'),keys=Object.keys(trayItems);
+  if(!keys.length){el.innerHTML='<div class="empty">なし</div>';return;}
+  el.innerHTML='';
+  keys.forEach(function(num){
+    var it=document.createElement('div');it.className='tray-item';
+    it.innerHTML='<span class="n">'+esc(num)+'<span class="nm">'+esc(trayItems[num].name||'')+'</span></span>'+
+      '<button class="btn btn-sm ok">消込</button><button class="btn-line btn-sm ng">除外</button>';
+    it.querySelector('.ok').onclick=function(){confirmNumber(num);};
+    it.querySelector('.ng').onclick=function(){delete trayItems[num];renderTray();};
+    el.appendChild(it);
+  });
+}
+function confirmNumber(num){
+  post({action:'confirm',number:num}).then(function(r){
+    if(r&&r.ok&&r.result==='done'){bumpStat('done');beep(880,90);}
+    delete trayItems[num];renderTray();
+  });
+}
+function refreshStats(){
+  if(!haveCfg())return;
+  post({action:'stats'}).then(function(r){
+    if(r&&r.ok){document.getElementById('sDone').textContent=r.done;
+      document.getElementById('sTodo').textContent=r.todo;document.getElementById('sOut').textContent=r.outside;}
+  }).catch(function(){});
+}
+function bumpStat(kind){
+  if(kind==='done'){
+    document.getElementById('sDone').textContent=+document.getElementById('sDone').textContent+1;
+    document.getElementById('sTodo').textContent=Math.max(0,+document.getElementById('sTodo').textContent-1);
+  }else if(kind==='outside'){document.getElementById('sOut').textContent=+document.getElementById('sOut').textContent+1;}
+}
+function showLast(num,sub,cls){
+  var l=document.getElementById('last');l.className='last'+cls;l.classList.remove('hidden');
+  document.getElementById('lastNum').textContent=num||'—';document.getElementById('lastSub').textContent=sub||'';
+}
+var actx;
+function beep(f,ms){try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();
+  var o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.connect(g);g.connect(actx.destination);
+  g.gain.setValueAtTime(0.12,actx.currentTime);o.start();o.stop(actx.currentTime+ms/1000);}catch(e){}}
+
+// ===== 起動 =====
+loadCfg();
+if(haveCfg()){ hideSetup(); afterCfg(); } else { showSetup(); }
+</script>
+</body>
+</html>
