@@ -113,13 +113,13 @@
 <canvas id="canvas" class="hidden"></canvas>
 
 <script>
-var SEND_INTERVAL_MS=700, STILL_THRESHOLD=18, JPEG_QUALITY=0.6, MAX_EDGE=720, SEEN_COOLDOWN_MS=8000;
-var FORCE_SEND_MS=1300, FETCH_TIMEOUT_MS=12000;
+var SEND_INTERVAL_MS=450, STILL_THRESHOLD=22, JPEG_QUALITY=0.6, MAX_EDGE=720, SEEN_COOLDOWN_MS=8000;
+var FORCE_SEND_MS=900, FETCH_TIMEOUT_MS=12000;
 var LS='shukka_cfg_v1';
 var CFG={url:'',token:'',worker:''};
 var video=document.getElementById('video'), canvas=document.getElementById('canvas');
 var ctx=canvas.getContext('2d',{willReadFrequently:true});
-var scanning=false,lastSentAt=0,prevGray=null,inFlight=false,recentSeen={},cameraReady=false;
+var scanning=false,lastSentAt=0,prevGray=null,inFlight=false,recentSeen={},cameraReady=false,wasMoving=true;
 
 // ===== 設定の保存・読込 =====
 function loadCfg(){try{var s=JSON.parse(localStorage.getItem(LS)||'{}');CFG.url=s.url||'';CFG.token=s.token||'';CFG.worker=s.worker||'';}catch(e){}}
@@ -212,10 +212,14 @@ function tick(){
   if(canvas.width!==w){canvas.width=w;canvas.height=h;}
   ctx.drawImage(video,0,0,w,h);
   var moved=frameDiff(),now=Date.now();
-  // 静止したら送る。動いていても最後の送信からFORCE_SEND_MS超なら送る（手ブレで読めない対策）
-  var still=(!moved&&(now-lastSentAt)>SEND_INTERVAL_MS);
-  var forced=((now-lastSentAt)>FORCE_SEND_MS);
-  if(still||forced){lastSentAt=now;sendFrame();}
+  var since=now-lastSentAt;
+  // 捕捉最速化: 「動いていた→止まった」瞬間を即送信（番号を枠に入れて止めた瞬間）。
+  // ただし連射しないよう SEND_INTERVAL_MS のクールダウンは守る。
+  var justSettled=(wasMoving && !moved && since>SEND_INTERVAL_MS);
+  // 手ブレで止まりきらなくても、FORCE_SEND_MS超なら送る（保険）
+  var forced=(since>FORCE_SEND_MS);
+  if(justSettled||forced){lastSentAt=now;sendFrame();}
+  wasMoving=moved;
 }
 function frameDiff(){
   var sw=32,sh=32,tmp=frameDiff._c||(frameDiff._c=document.createElement('canvas'));
